@@ -106,6 +106,7 @@
         .option-label { display: flex; align-items: center; gap: 6px; color: #ddd; font-size: 14px; cursor: pointer; }
         .option-label input { cursor: pointer; accent-color: var(--gold-main); }
 
+        /* 커스텀 프로필 뷰어 스타일 */
         .community-theme { line-height: 1.6; font-size: 15px; padding: 25px; background: rgba(15, 14, 18, 0.7); border-radius: 12px; border: 1px solid rgba(140, 112, 59, 0.2); min-height: 500px; box-shadow: inset 0 0 15px rgba(0,0,0,0.3); color: var(--text-main); overflow-y: auto; }
         .community-theme p { margin-top: 0; margin-bottom: 14px; word-break: keep-all; min-height: 1em; }
         .community-theme strong, .community-theme b { color: var(--gold-light); font-weight: bold; }
@@ -373,10 +374,13 @@
     let playerData = null;
     let systemData = null; 
 
+    // 입력한 이름(시트 기재 이름 등)을 실제 캐릭터 시트의 이름으로 변환하는 함수
     function resolveCharacterName(inputName) {
         if (!systemData || !systemData.guests) return inputName;
+        // 1. '시트 기재 이름'으로 검색
         let match1 = systemData.guests.find(g => g['시트 기재 이름'] === inputName);
         if (match1 && match1['이름']) return match1['이름'];
+        // 2. '이름'으로 검색
         let match2 = systemData.guests.find(g => g['이름'] === inputName);
         if (match2 && match2['이름']) return match2['이름'];
         
@@ -529,6 +533,7 @@
 
         let merged = systemData.guests.map(g => {
             let sheetName = g['시트 기재 이름'] || g['이름'];
+            // 실제 이름 기반으로 캐릭터 데이터를 매칭
             let charData = systemData.allCharacters.find(c => c.name === g['이름']);
             return {
                 name: g['이름'],
