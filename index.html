@@ -1406,7 +1406,7 @@
         let sortedRarities = Object.keys(grouped).sort((a,b) => Number(a) - Number(b));
         
         sortedRarities.forEach((rLevel, index) => {
-            grouped[rLevel].sort((a, b) => b['이름'].localeCompare(a['이름'], 'ko'));
+            grouped[rLevel].sort((a, b) => a['이름'].localeCompare(b['이름'], 'ko'));
             
             let groupHtml = `<div style="margin-bottom: 25px; text-align:left;">`;
             groupHtml += `<div style="color: var(--gold-light); border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom:10px; padding-bottom:5px; font-weight:bold;">✦ 등급 ${index + 1} ✦</div>`;
