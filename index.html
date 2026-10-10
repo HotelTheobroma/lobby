@@ -105,6 +105,7 @@
         .option-label { display: flex; align-items: center; gap: 6px; color: #ddd; font-size: 14px; cursor: pointer; }
         .option-label input { cursor: pointer; accent-color: var(--gold-main); }
 
+        /* 커스텀 프로필 뷰어 스타일 */
         .community-theme { line-height: 1.6; font-size: 15px; padding: 25px; background: rgba(15, 14, 18, 0.7); border-radius: 12px; border: 1px solid rgba(140, 112, 59, 0.2); min-height: 500px; box-shadow: inset 0 0 15px rgba(0,0,0,0.3); color: var(--text-main); overflow-y: auto; }
         .community-theme p { margin-top: 0; margin-bottom: 14px; word-break: keep-all; min-height: 1em; }
         .community-theme strong, .community-theme b { color: var(--gold-light); font-weight: bold; }
@@ -171,7 +172,7 @@
         <div class="modal-box">
             <h3 id="modal-delete-item-name" style="color: #ff5555; font-size: 22px; margin-top:0;">아이템 이름</h3>
             <p style="color: #fff; font-size: 18px; margin-bottom: 5px;">아이템을 삭제하시겠습니까?</p>
-            <p style="color: var(--text-sub); font-size: 12px;">※ 아이템 효과는 적용되지 않습니다.</p>
+            <p id="modal-delete-notice" style="color: var(--text-sub); font-size: 12px;">※ 아이템 효과는 적용되지 않습니다.</p>
             <div style="display: flex; gap: 10px; margin-top: 25px;">
                 <button class="btn-primary" id="btn-confirm-delete">확인</button>
                 <button class="btn-primary btn-cancel" onclick="closeDeleteModal()">취소</button>
@@ -433,7 +434,6 @@
         return 1;
     }
 
-    // 소지품 하나의 남은 사용 횟수 (저장된 값이 없으면 시트 기본값)
     function getRemainingUses(itemObj) {
         if (!itemObj) return 1;
         let n = parseInt(itemObj.uses);
@@ -441,12 +441,63 @@
         return getItemMaxUses(itemObj.name);
     }
 
-    // 새 소지품 객체 생성 (사용 횟수 포함)
-    function makeInvItem(name) {
-        return {name: name, date: "", sender: "시스템", msg: "", read: true, uses: getItemMaxUses(name)};
+    function genItemId() {
+        return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
 
-    // 사용 횟수 1 차감. 0이 되면 목록에서 제거. 반환값: 차감 후 남은 횟수
+    function makeInvItem(name) {
+        return {id: genItemId(), name: name, date: "", sender: "시스템", msg: "", read: true, uses: getItemMaxUses(name)};
+    }
+
+    let syncedIds = [];
+
+    function applyMe(me) {
+        if (!me) return;
+        playerData.coins = Number(me.coins) || 0;
+        playerData.hp = Number(me.hp) || 0;
+        playerData.maxHp = Number(me.maxHp) || 0;
+        playerData.status = me.status || "";
+        playerData.inventory = Array.isArray(me.inventory) ? me.inventory : [];
+        syncedIds = playerData.inventory.map(i => i.id).filter(Boolean);
+        updateTopBar();
+        updateGachaButtonUI();
+        if (document.getElementById('view-inventory').classList.contains('active')) buildInventoryUI();
+    }
+
+    function takeSnapshot() {
+        return JSON.parse(JSON.stringify({coins: playerData.coins, hp: playerData.hp, status: playerData.status, inventory: playerData.inventory}));
+    }
+    function restoreSnapshot(snap) {
+        if (!snap) return;
+        playerData.coins = snap.coins; playerData.hp = snap.hp;
+        playerData.status = snap.status; playerData.inventory = snap.inventory;
+        updateTopBar();
+        updateGachaButtonUI();
+        if (document.getElementById('view-inventory').classList.contains('active')) buildInventoryUI();
+    }
+
+    function findInvIndexById(id) {
+        return playerData.inventory.findIndex(i => i.id === id);
+    }
+
+    let refreshing = false;
+    async function refreshMe() {
+        if (!playerData || refreshing) return;
+        refreshing = true;
+        try {
+            const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'refresh', row: playerData.row }) });
+            const res = await response.json();
+            if (res && res.success) {
+                const anyModal = [...document.querySelectorAll('.modal-overlay')].some(m => m.style.display === 'flex');
+                if (!anyModal && document.getElementById('loading-overlay').style.display !== 'flex') {
+                    if (res.systemData) systemData = res.systemData;
+                    applyMe(res.me);
+                }
+            }
+        } catch (e) {}
+        refreshing = false;
+    }
+
     function consumeOneUse(index) {
         let itemObj = playerData.inventory[index];
         let remain = getRemainingUses(itemObj);
@@ -556,6 +607,7 @@
     function openInventoryView() {
         document.getElementById('ui-inv-alert').style.display = 'none';
         nav('inventory', '내 소지품');
+        refreshMe();
     }
 
     function openGuestList() {
@@ -570,7 +622,6 @@
 
         let merged = systemData.guests.map(g => {
             let sheetName = g['시트 기재 이름'] || g['이름'];
-            // 실제 이름 기반으로 캐릭터 데이터를 매칭
             let charData = systemData.allCharacters.find(c => c.name === g['이름']);
             return {
                 name: g['이름'],
@@ -818,9 +869,8 @@
         showLoading(false);
         
         if (res && res.success) {
-            playerData.coins = res.newCoins;
             systemData = res.systemData;
-            updateTopBar();
+            if (res.me) applyMe(res.me); else { playerData.coins = res.newCoins; updateTopBar(); }
             updateAttendanceUI(); 
             alert("출석이 완료되었습니다! 100 코인을 획득했습니다.");
         } else {
@@ -856,6 +906,7 @@
             if (res.success) {
                 playerData = res.charData;
                 systemData = res.systemData; 
+                syncedIds = (playerData.inventory || []).map(i => i.id).filter(Boolean);
                 document.getElementById('top-bar').style.display = 'flex';
                 updateTopBar();
                 buildNPCUI();
@@ -986,7 +1037,7 @@
 
             list.innerHTML += `
                 <div class="item-card">
-                    <div class="item-delete-btn" onclick="openDeleteModal(${index}, '${itemName}')" title="삭제하기">✖</div>
+                    <div class="item-delete-btn" onclick="openDeleteModal(${index})" title="삭제하기">✖</div>
 
                     ${metaHtml}
                     <div style="padding-right: 80px;">
@@ -995,8 +1046,8 @@
                         <div style="font-size: 14px; color: #ccc; margin-top: 8px;">${effect}</div>
                     </div>
                     <div style="display: flex; gap: 10px; margin-top:15px;">
-                        <button class="btn-outline" style="flex: 1; border-color: rgba(255,255,255,0.2);" onclick="openUseModal(${index}, '${itemName}')">사용</button>
-                        ${itemName.startsWith("[코인 송금]") ? '' : `<button class="btn-outline" style="flex: 1; border-color: rgba(255,255,255,0.2);" onclick="openTransferModal(${index}, '${itemName}')">양도</button>`}
+                        <button class="btn-outline" style="flex: 1; border-color: rgba(255,255,255,0.2);" onclick="openUseModal(${index})">사용</button>
+                        ${itemName.startsWith("[코인 송금]") ? '' : `<button class="btn-outline" style="flex: 1; border-color: rgba(255,255,255,0.2);" onclick="openTransferModal(${index})">양도</button>`}
                     </div>
                 </div>
             `;
@@ -1082,9 +1133,10 @@
         });
         showLoading(false);
 
+        if (res && res.systemData) systemData = res.systemData;
+        if (res && res.me) applyMe(res.me);
         if (res && res.success) {
-            playerData.coins = res.newCoins;
-            updateTopBar();
+            if (!res.me) { playerData.coins = res.newCoins; updateTopBar(); }
             alert(`[성공]\n${targetName} 님에게 ${amount} 코인을 송금했습니다.`);
         } else {
             alert("양도 실패: " + (res ? res.msg : "서버 오류"));
@@ -1112,7 +1164,7 @@
         if (item.read === false) {
             item.read = true;
             updateTopBar();
-            savePlayerData("편지확인", `[${item.name}]의 동봉된 편지 내용 확인 완료`, null, null);
+            savePlayerData("편지확인", `[${item.name}]의 동봉된 편지 내용 확인 완료`, {});
         }
     }
 
@@ -1121,12 +1173,18 @@
         buildInventoryUI(); 
     }
 
-    let currentDeleteIndex = -1; 
+    let currentDeleteId = null; 
     let currentDeleteItem = "";
-    function openDeleteModal(index, itemName) {
-        currentDeleteIndex = index; 
-        currentDeleteItem = itemName;
-        document.getElementById('modal-delete-item-name').innerText = itemName;
+    function openDeleteModal(index) {
+        const itemObj = playerData.inventory[index];
+        if (!itemObj) return;
+        currentDeleteId = itemObj.id; 
+        currentDeleteItem = itemObj.name;
+        document.getElementById('modal-delete-item-name').innerText = itemObj.name;
+        const remain = getRemainingUses(itemObj);
+        document.getElementById('modal-delete-notice').innerText = remain > 1
+            ? `※ 남은 사용 횟수 ${remain}회가 모두 사라지며, 아이템 효과는 적용되지 않습니다.`
+            : `※ 아이템 효과는 적용되지 않습니다.`;
         document.getElementById('modal-delete-overlay').style.display = 'flex';
     }
     
@@ -1137,20 +1195,27 @@
     document.getElementById('btn-confirm-delete').onclick = async function() {
         closeDeleteModal();
         let itemName = currentDeleteItem;
-        playerData.inventory.splice(currentDeleteIndex, 1); 
+        const idx = findInvIndexById(currentDeleteId);
+        if (idx === -1) return alert("이미 사라진 아이템입니다.");
+        const snap = takeSnapshot();
+        const remain = getRemainingUses(playerData.inventory[idx]);
+        playerData.inventory.splice(idx, 1); 
 
-        let logMsg = `[${itemName}] 아이템 버림(삭제 완료)`;
+        let logMsg = `[${itemName}] 아이템 버림(삭제 완료)` + (remain > 1 ? ` (남은 사용 횟수 ${remain}회 포함)` : '');
 
-        const success = await savePlayerData("아이템삭제", logMsg);
+        const success = await savePlayerData("아이템삭제", logMsg, {snapshot: snap});
         if(success) {
             alert(`[${itemName}]${getJosa(itemName, '을/를')} 버렸습니다.`);
             buildInventoryUI(); 
         }
     };
 
-    let currentUseIndex = -1; let currentUseItem = "";
-    function openUseModal(index, itemName) {
-        currentUseIndex = index; currentUseItem = itemName;
+    let currentUseId = null; let currentUseItem = "";
+    function openUseModal(index) {
+        const itemObj = playerData.inventory[index];
+        if (!itemObj) return;
+        const itemName = itemObj.name;
+        currentUseId = itemObj.id; currentUseItem = itemName;
         document.getElementById('modal-use-item-name').innerText = itemName;
 
         let remainUses = getRemainingUses(playerData.inventory[index]);
@@ -1202,7 +1267,11 @@
     document.getElementById('btn-confirm-use').onclick = async function() {
         closeUseModal();
         let itemName = currentUseItem;
-        let remainAfter = consumeOneUse(currentUseIndex);
+        const idx = findInvIndexById(currentUseId);
+        if (idx === -1) return alert("이미 사라진 아이템입니다.");
+
+        const snap = takeSnapshot();
+        let remainAfter = consumeOneUse(idx);
 
         let isCoinTransfer = itemName.startsWith("[코인 송금]");
         let coinAmt = 0;
@@ -1216,8 +1285,8 @@
             : `[${itemName}] 사용`;
         if(isCoinTransfer) logMsg = `[코인 수령] ${coinAmt} 코인 획득`;
 
-        let newHp = Number(playerData.hp);
-        let newStatus = playerData.status;
+        let hpDelta = 0;
+        let cureStatus = "";
 
         if (!isCoinTransfer) {
             let tagStr = getItemTag(itemName);
@@ -1225,25 +1294,14 @@
             tags.forEach(t => {
                 if (t.startsWith('[체력회복:')) {
                     let valStr = t.match(/\[체력회복:(.+?)\]/)[1];
-                    let oldHp = newHp;
-                    if (valStr.includes('%')) {
-                        let percent = parseInt(valStr);
-                        newHp = Math.min(playerData.maxHp, newHp + Math.floor(playerData.maxHp * percent / 100));
-                    } else {
-                        newHp = Math.min(playerData.maxHp, newHp + parseInt(valStr));
-                    }
-                    if (newHp > oldHp) logMsg += ` (체력 회복 적용 -> ${newHp}/${playerData.maxHp})`;
+                    let amount = valStr.includes('%')
+                        ? Math.floor(playerData.maxHp * parseInt(valStr) / 100)
+                        : parseInt(valStr);
+                    if (!isNaN(amount)) hpDelta += amount;
                 } else if (t === '[상태이상해제]') {
-                    if (newStatus !== "") {
-                        logMsg += ` (상태이상 '${newStatus}' 해제)`;
-                        newStatus = "";
-                    }
+                    cureStatus = '*';
                 } else if (t.startsWith('[상태이상해제:')) {
-                    let targetStatus = t.match(/\[상태이상해제:(.+?)\]/)[1];
-                    if (newStatus === targetStatus) {
-                        logMsg += ` (상태이상 '${newStatus}' 해제)`;
-                        newStatus = "";
-                    }
+                    if (cureStatus !== '*') cureStatus = t.match(/\[상태이상해제:(.+?)\]/)[1];
                 }
                 else if (t.startsWith('[코인획득:')) {
                     let valStr = t.match(/\[코인획득:(.+?)\]/)[1];
@@ -1256,27 +1314,33 @@
             });
         }
 
-        playerData.hp = newHp;
-        playerData.status = newStatus;
-        
-        if (coinAmt > 0) {
-            playerData.coins += coinAmt;
-        }
+        if (coinAmt > 0) playerData.coins += coinAmt;
 
-        const success = await savePlayerData(isCoinTransfer ? "코인수령" : "아이템사용", logMsg, null, null, newHp, newStatus);
-        if(success) {
+        const res = await savePlayerData(isCoinTransfer ? "코인수령" : "아이템사용", logMsg, {
+            coinDelta: coinAmt, hpDelta: hpDelta, cureStatus: cureStatus, snapshot: snap
+        });
+        if(res) {
             if(isCoinTransfer) {
                 alert(`${coinAmt} 코인을 수령했습니다.`);
             } else {
-                alert(`[${itemName}]${getJosa(itemName, '을/를')} 사용했습니다.` + (remainAfter > 0 ? `\n(남은 사용 횟수: ${remainAfter}회)` : ''));
+                let msg = `[${itemName}]${getJosa(itemName, '을/를')} 사용했습니다.`;
+                if (hpDelta !== 0 && res.me && res.hpBefore !== undefined && res.me.hp !== res.hpBefore) {
+                    msg += `\n체력: ${res.hpBefore} → ${res.me.hp} / ${res.me.maxHp}`;
+                }
+                if (res.curedStatus) msg += `\n상태이상 '${res.curedStatus}' 해제`;
+                if (remainAfter > 0) msg += `\n(남은 사용 횟수: ${remainAfter}회)`;
+                alert(msg);
             }
             buildInventoryUI(); 
         }
     };
 
-    let currentTransferIndex = -1; let currentTransferItem = "";
-    function openTransferModal(index, itemName) {
-        currentTransferIndex = index; currentTransferItem = itemName;
+    let currentTransferId = null; let currentTransferItem = "";
+    function openTransferModal(index) {
+        const itemObj = playerData.inventory[index];
+        if (!itemObj) return;
+        const itemName = itemObj.name;
+        currentTransferId = itemObj.id; currentTransferItem = itemName;
         document.getElementById('modal-transfer-item-name').innerText = itemName;
         document.getElementById('transfer-target-name').value = ""; 
         
@@ -1320,8 +1384,11 @@
 
         closeTransferModal();
         const itemToTransfer = currentTransferItem;
-        
-        const removedItemObj = playerData.inventory.splice(currentTransferIndex, 1)[0];
+        const idx = findInvIndexById(currentTransferId);
+        if (idx === -1) return alert("이미 사라진 아이템입니다.");
+
+        const snap = takeSnapshot();
+        const removedItemObj = playerData.inventory.splice(idx, 1)[0];
         const transferUses = getRemainingUses(removedItemObj);
 
         let now = new Date();
@@ -1345,19 +1412,24 @@
             name: playerData.name, 
             senderRow: playerData.row,
             senderNewInventory: playerData.inventory, 
+            syncedIds: syncedIds,
             targetName: targetName, 
             itemName: itemToTransfer,
+            itemId: removedItemObj.id,
             itemUses: transferUses,
             transferData: transferDataObj
         });
         showLoading(false);
 
+        if (res && res.systemData) systemData = res.systemData;
         if (res && res.success) {
-            alert(`[성공]\n[${itemToTransfer}]${getJosa(itemToTransfer, '을/를')} ${targetName} 님에게 양도했습니다.`);
+            applyMe(res.me);
+            alert(`[성공]\n[${itemToTransfer}]${getJosa(itemToTransfer, '을/를')} ${targetName} 님에게 양도했습니다.` + (transferUses > 1 ? `\n(남은 사용 횟수 ${transferUses}회)` : ''));
             buildInventoryUI(); 
         } else {
+            if (res && res.me) applyMe(res.me); else restoreSnapshot(snap);
             alert("양도 실패: " + (res ? res.msg : "서버 오류"));
-            playerData.inventory.splice(currentTransferIndex, 0, removedItemObj);
+            buildInventoryUI();
         }
     };
 
@@ -1383,7 +1455,7 @@
     function buildFixedShopUI() {
         const shopContainer = document.getElementById('shop-fixed-items');
         shopContainer.innerHTML = '';
-        systemData.fixedItems.forEach(item => {
+        systemData.fixedItems.forEach((item, fixedIdx) => {
             let isLimited = item['한정판매'] === 'Y';
             let stock = Number(item['개수']) || 0;
             let stockHtml = ''; let isSoldOut = false;
@@ -1404,47 +1476,60 @@
                         <div style="margin-bottom: 10px;">${stockHtml}${getItemMaxUses(item['이름']) > 1 ? ` <span style="color: var(--gold-main); font-size: 13px; margin-left:6px;">[사용 ${getItemMaxUses(item['이름'])}회]</span>` : ''}</div>
                         <div style="font-size: 14px; color: #ccc; margin-bottom: 15px; min-height: 40px;">${item['효과']}</div>
                     </div>
-                    <button class="btn-outline" style="width: 100%; border-color: rgba(255,255,255,0.2);" ${isSoldOut ? 'disabled' : ''} onclick="buyItem('${item['이름']}', ${item['가격']}, '${item['효과']}', ${isLimited}, ${stock})">${isSoldOut ? '품절' : '구매하기'}</button>
+                    <button class="btn-outline" style="width: 100%; border-color: rgba(255,255,255,0.2);" ${isSoldOut ? 'disabled' : ''} onclick="buyItem(${fixedIdx})">${isSoldOut ? '품절' : '구매하기'}</button>
                 </div>
             `;
         });
     }
 
-    async function savePlayerData(logType, logDetails, decrementItemName = null, randomDecrements = null, newHp = undefined, newStatus = undefined) {
+    async function savePlayerData(logType, logDetails, opts = {}) {
         showLoading(true);
         const res = await fetchDB({
             action: 'update', row: playerData.row, name: playerData.name,
-            newCoins: playerData.coins, newInventory: playerData.inventory,
+            newInventory: playerData.inventory, syncedIds: syncedIds,
             type: logType, logDetails: logDetails,
-            decrementItemName: decrementItemName,
-            randomDecrements: randomDecrements,
-            newHp: newHp !== undefined ? newHp : playerData.hp,
-            newStatus: newStatus !== undefined ? newStatus : playerData.status
+            coinDelta: opts.coinDelta || 0,
+            hpDelta: opts.hpDelta || 0,
+            cureStatus: opts.cureStatus || "",
+            decrementItemName: opts.decrementItemName || null,
+            randomDecrements: opts.randomDecrements || null
         });
         showLoading(false);
-        if (res && res.success) { 
-            updateTopBar(); 
-            if(res.systemData) {
-                systemData = res.systemData;
-                buildFixedShopUI(); 
-                updateLimitedGachaUI(); 
-            }
-            updateGachaButtonUI();
-            return true; 
-        } 
-        else { 
+
+        if (res && res.systemData) {
+            systemData = res.systemData;
+            buildFixedShopUI();
+            updateLimitedGachaUI();
+        }
+
+        if (res && res.success) {
+            applyMe(res.me);
+            return res;
+        } else {
+            // 실패: 서버가 최신 정보를 줬으면 그걸로, 아니면 작업 전 상태로 되돌림
+            if (res && res.me) applyMe(res.me);
+            else restoreSnapshot(opts.snapshot);
             alert("시트 반영 실패!\n(사유: " + (res ? res.msg : "서버 응답 없음") + ")");
-            return false; 
+            return false;
         }
     }
 
-    async function buyItem(name, price, effect, isLimited, currentStock) {
+    async function buyItem(fixedIdx) {
+        const item = systemData.fixedItems[fixedIdx];
+        if (!item) return;
+        const name = item['이름'];
+        const price = Number(item['가격']) || 0;
+        const effect = item['효과'] || '';
+        const isLimited = item['한정판매'] === 'Y';
+        const currentStock = Number(item['개수']) || 0;
+
         if (isLimited && currentStock <= 0) return alert("품절된 상품입니다.");
         if (playerData.coins < price) return alert("코인이 부족합니다!");
         if(confirm(`[${name}]${getJosa(name, '을/를')} ${price} 코인에 구매하시겠습니까?\n효과: ${effect}`)) {
+            const snap = takeSnapshot();
             playerData.coins -= price;
             playerData.inventory.push(makeInvItem(name));
-            const success = await savePlayerData("고정구매", `${name} 구매`, isLimited ? name : null);
+            const success = await savePlayerData("고정구매", `${name} 구매`, {coinDelta: -price, decrementItemName: isLimited ? name : null, snapshot: snap});
             if(success) alert(`[시스템] 구매 완료!\n'${name}'${getJosa(name, '이/가')} 소지품에 추가되었습니다.`);
         }
     }
@@ -1567,22 +1652,12 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         return pickedItem;
     }
 
-    function restoreTicket(backup, index) {
-        if (!backup) return;
-        let cur = playerData.inventory[index];
-        if (cur && cur.name === backup.name && getRemainingUses(backup) > 1) {
-            cur.uses = getRemainingUses(backup);  
-        } else {
-            playerData.inventory.splice(index, 0, backup); 
-        }
-    }
-
     let gachaCount = 0;
     async function rollGacha(times) {
         let cost = times === 11 ? 1000 : 100;
         let useTicket = false;
         let ticketIndex = -1;
-        let ticketObjBackup = null;
+        const snap = takeSnapshot();
 
         if (times === 1) {
             if (playerData && playerData.inventory) {
@@ -1599,7 +1674,6 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         if(availableCheck.length === 0) return alert("현재 뽑을 수 있는 아이템이 모두 품절되었습니다!");
 
         if (useTicket) {
-            ticketObjBackup = {...playerData.inventory[ticketIndex]};
             consumeOneUse(ticketIndex);
         } else {
             playerData.coins -= cost; 
@@ -1638,13 +1712,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         
         if(pulledItems.length === 0) {
             alert("시스템 오류로 아이템을 뽑지 못했습니다.");
-            if (useTicket) {
-                restoreTicket(ticketObjBackup, ticketIndex);
-            } else {
-                playerData.coins += cost;
-            }
-            updateTopBar();
-            updateGachaButtonUI();
+            restoreSnapshot(snap);
             return;
         }
 
@@ -1661,7 +1729,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         }
         
         let bestQuote = getSafeVal(bestItem, '대사').toString().trim();
-        let logMsg = useTicket ? `(1회 뽑기권 1개 소모)\n` : ""; 
+        let logMsg = useTicket ? `(1회 뽑기권 1회 소모, 남은 뽑기권 ${countTickets()}회)\n` : ""; 
         let instantHpChange = 0;
         const logArea = document.getElementById('gacha-log');
 
@@ -1765,21 +1833,16 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
 
         if (instantHpChange !== 0) {
             playerData.hp = Math.min(playerData.maxHp, Math.max(0, playerData.hp + instantHpChange));
+            updateTopBar();
         }
 
-        const success = await savePlayerData("가챠", logMsg.trim(), null, decrements, instantHpChange !== 0 ? playerData.hp : undefined);
-        
-        if (!success) {
-            if (useTicket) {
-                restoreTicket(ticketObjBackup, ticketIndex);
-            } else {
-                playerData.coins += cost; 
-            }
-            for(let i=0; i<times; i++) { if(!pulledItems[i].isInstant) playerData.inventory.pop(); }
-            if (instantHpChange !== 0) playerData.hp -= instantHpChange; 
-            updateTopBar();
-            updateGachaButtonUI();
-        }
+        // 실패하면 savePlayerData가 뽑기 전 상태로 되돌립니다.
+        await savePlayerData("가챠", logMsg.trim(), {
+            coinDelta: useTicket ? 0 : -cost,
+            hpDelta: instantHpChange,
+            randomDecrements: decrements,
+            snapshot: snap
+        });
     }
 
     async function rollHeal() {
@@ -1805,32 +1868,23 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         let healAmount = base + dice;
         logResult = `회복량: ${base} + 1d${diceSides}(${dice}) = 각각 ${healAmount} 회복!\n\n[체력 반영 결과]\n`;
         
+        let unknownNames = [];
         names.forEach(target => {
-            let char = getCharInfo(target);
-            if(char) {
-                let newHp = Math.min(char.hp + healAmount, char.maxHp);
-                char.hp = newHp;
-                updates.push({name: target, healAmount: healAmount});
-                logResult += `- ${target} : 반영 완료 (${newHp} / ${char.maxHp})\n`;
-            } else {
-                logResult += `- ${target} : 미등록 유저\n`;
-            }
+            if(getCharInfo(target)) updates.push({name: target, healAmount: healAmount});
+            else unknownNames.push(target);
         });
 
+        // 실제 체력 계산은 서버가 시트의 최신 체력 기준으로 합니다.
         showLoading(true);
-        const res = await fetchDB({ action: 'healTargets', name: playerData.name, targets: updates, logDetails: logResult });
+        const res = await fetchDB({ action: 'healTargets', name: playerData.name, row: playerData.row, targets: updates, unknownNames: unknownNames, logHeader: logResult });
         showLoading(false);
 
         if (res && res.success) {
-            if (updates.some(u => u.name === playerData.name)) {
-                let myChar = getCharInfo(playerData.name);
-                if(myChar) playerData.hp = myChar.hp;
-                updateTopBar();
-            }
             if (res.systemData) { systemData = res.systemData; buildDailyLogs(); }
+            if (res.me) applyMe(res.me);
             
             const logArea = document.getElementById('heal-log');
-            logArea.value += `==========[ 시스템 ]==========\n${logResult}\n\n`;
+            logArea.value += `==========[ 시스템 ]==========\n${res.logDetails || logResult}\n\n`;
             logArea.scrollTop = logArea.scrollHeight;
             
             for (let i = 1; i <= 3; i++) document.getElementById(`target-${i}`).value = '';
