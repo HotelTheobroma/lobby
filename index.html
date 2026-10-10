@@ -160,7 +160,7 @@
             <h3 id="modal-use-item-name" style="color: var(--gold-light); font-size: 22px; margin-top:0;">아이템 이름</h3>
             <div id="modal-use-effect-desc" style="color: #4caf50; font-size: 15px; margin-bottom: 10px; font-weight:bold;"></div>
             <p style="color: #fff; font-size: 18px; margin-bottom: 5px;">사용하시겠습니까?</p>
-            <p style="color: var(--text-sub); font-size: 12px;">※ 사용할 경우 소지품 목록에서 사라집니다.</p>
+            <p id="modal-use-notice" style="color: var(--text-sub); font-size: 12px;">※ 사용할 경우 소지품 목록에서 사라집니다.</p>
             <div style="display: flex; gap: 10px; margin-top: 25px;">
                 <button class="btn-primary" id="btn-confirm-use">확인</button>
                 <button class="btn-primary btn-cancel" onclick="closeUseModal()">취소</button>
@@ -404,7 +404,9 @@
 
     function countTickets() {
         if(!playerData || !playerData.inventory) return 0;
-        return playerData.inventory.filter(item => item.name === '1회 뽑기권').length;
+        return playerData.inventory
+            .filter(item => item.name === '1회 뽑기권')
+            .reduce((sum, item) => sum + getRemainingUses(item), 0);
     }
 
     function updateGachaButtonUI() {
@@ -418,6 +420,48 @@
             btn.classList.remove('btn-ticket');
             btn.innerHTML = `1회 탐색 (100 코인)`;
         }
+    }
+
+    // ===== 사용 횟수 관련 =====
+    // 시트의 '사용횟수' 열에서 아이템의 최대 사용 횟수를 읽어옴 (비어 있으면 1회)
+    function getItemMaxUses(itemName) {
+        if (!systemData || !itemName) return 1;
+        if (itemName.startsWith("[코인 송금]")) return 1;
+        const lists = [systemData.fixedItems, systemData.randomItems, systemData.customItems];
+        for (let list of lists) {
+            if (!list) continue;
+            let it = list.find(i => (i['이름'] === itemName || i['아이템이름'] === itemName));
+            if (!it) continue;
+            let raw = it['사용횟수'] ?? it['사용 횟수'];
+            let n = parseInt(raw);
+            if (!isNaN(n) && n >= 1) return n;
+        }
+        return 1;
+    }
+
+    // 소지품 하나의 남은 사용 횟수 (저장된 값이 없으면 시트 기본값)
+    function getRemainingUses(itemObj) {
+        if (!itemObj) return 1;
+        let n = parseInt(itemObj.uses);
+        if (!isNaN(n) && n >= 1) return n;
+        return getItemMaxUses(itemObj.name);
+    }
+
+    // 새 소지품 객체 생성 (사용 횟수 포함)
+    function makeInvItem(name) {
+        return {name: name, date: "", sender: "시스템", msg: "", read: true, uses: getItemMaxUses(name)};
+    }
+
+    // 사용 횟수 1 차감. 0이 되면 목록에서 제거. 반환값: 차감 후 남은 횟수
+    function consumeOneUse(index) {
+        let itemObj = playerData.inventory[index];
+        let remain = getRemainingUses(itemObj);
+        if (remain > 1) {
+            itemObj.uses = remain - 1;
+            return itemObj.uses;
+        }
+        playerData.inventory.splice(index, 1);
+        return 0;
     }
 
     function getItemTag(itemName) {
@@ -938,13 +982,22 @@
                 `;
             }
 
+            let maxUses = getItemMaxUses(itemName);
+            let remainUses = getRemainingUses(itemObj);
+            let usesHtml = "";
+            if (maxUses > 1 || remainUses > 1) {
+                let usesColor = remainUses === 1 ? '#ff7777' : 'var(--gold-main)';
+                usesHtml = `<span style="display:inline-block; margin-top:6px; font-size:12px; font-weight:bold; color:${usesColor}; background:rgba(0,0,0,0.4); border:1px solid rgba(212,178,111,0.3); padding:2px 8px; border-radius:10px;">남은 사용 횟수 ${remainUses} / ${Math.max(maxUses, remainUses)}</span>`;
+            }
+
             list.innerHTML += `
                 <div class="item-card">
                     <div class="item-delete-btn" onclick="openDeleteModal(${index}, '${itemName}')" title="삭제하기">✖</div>
-                    
+
                     ${metaHtml}
                     <div style="padding-right: 80px;">
                         <div style="color: var(--gold-light); font-weight: bold; font-size:18px;">${itemName}</div>
+                        ${usesHtml}
                         <div style="font-size: 14px; color: #ccc; margin-top: 8px;">${effect}</div>
                     </div>
                     <div style="display: flex; gap: 10px; margin-top:15px;">
@@ -1105,7 +1158,12 @@
     function openUseModal(index, itemName) {
         currentUseIndex = index; currentUseItem = itemName;
         document.getElementById('modal-use-item-name').innerText = itemName;
-        
+
+        let remainUses = getRemainingUses(playerData.inventory[index]);
+        document.getElementById('modal-use-notice').innerText = remainUses > 1
+            ? `※ 사용 시 사용 횟수가 1회 차감됩니다. (남은 횟수 ${remainUses}회 → ${remainUses - 1}회)`
+            : `※ 마지막 사용입니다. 사용할 경우 소지품 목록에서 사라집니다.`;
+
         let effectDescs = [];
         
         if (itemName.startsWith("[코인 송금]")) {
@@ -1150,7 +1208,7 @@
     document.getElementById('btn-confirm-use').onclick = async function() {
         closeUseModal();
         let itemName = currentUseItem;
-        playerData.inventory.splice(currentUseIndex, 1); 
+        let remainAfter = consumeOneUse(currentUseIndex);
 
         let isCoinTransfer = itemName.startsWith("[코인 송금]");
         let coinAmt = 0;
@@ -1158,8 +1216,10 @@
             let match = itemName.match(/\[코인 송금\] (\d+) 코인/);
             if(match) coinAmt = parseInt(match[1]);
         }
-        
-        let logMsg = `[${itemName}] 사용`;
+
+        let logMsg = remainAfter > 0
+            ? `[${itemName}] 사용 (남은 사용 횟수 ${remainAfter}회)`
+            : `[${itemName}] 사용`;
         if(isCoinTransfer) logMsg = `[코인 수령] ${coinAmt} 코인 획득`;
 
         let newHp = Number(playerData.hp);
@@ -1214,7 +1274,7 @@
             if(isCoinTransfer) {
                 alert(`${coinAmt} 코인을 수령했습니다.`);
             } else {
-                alert(`[${itemName}]${getJosa(itemName, '을/를')} 사용했습니다.`);
+                alert(`[${itemName}]${getJosa(itemName, '을/를')} 사용했습니다.` + (remainAfter > 0 ? `\n(남은 사용 횟수: ${remainAfter}회)` : ''));
             }
             buildInventoryUI(); 
         }
@@ -1267,7 +1327,8 @@
         closeTransferModal();
         const itemToTransfer = currentTransferItem;
         
-        playerData.inventory.splice(currentTransferIndex, 1); 
+        const removedItemObj = playerData.inventory.splice(currentTransferIndex, 1)[0];
+        const transferUses = getRemainingUses(removedItemObj);
 
         let now = new Date();
         let year = now.getFullYear();
@@ -1280,7 +1341,8 @@
         let transferDataObj = {
             date: dateStr,
             sender: isAnonymous ? "익명" : playerData.name,
-            msg: messageText
+            msg: messageText,
+            uses: transferUses
         };
 
         showLoading(true);
@@ -1291,6 +1353,7 @@
             senderNewInventory: playerData.inventory, 
             targetName: targetName, 
             itemName: itemToTransfer,
+            itemUses: transferUses,
             transferData: transferDataObj
         });
         showLoading(false);
@@ -1300,7 +1363,7 @@
             buildInventoryUI(); 
         } else {
             alert("양도 실패: " + (res ? res.msg : "서버 오류"));
-            playerData.inventory.splice(currentTransferIndex, 0, {name: itemToTransfer, date: "", sender: "시스템", msg: "", read: true});
+            playerData.inventory.splice(currentTransferIndex, 0, removedItemObj);
         }
     };
 
@@ -1344,7 +1407,7 @@
                             <span style="color: var(--gold-light); font-weight: bold; font-size:18px;">${item['이름']}</span>
                             <span style="color: var(--gold-main);">${item['가격']} 코인</span>
                         </div>
-                        <div style="margin-bottom: 10px;">${stockHtml}</div>
+                        <div style="margin-bottom: 10px;">${stockHtml}${getItemMaxUses(item['이름']) > 1 ? ` <span style="color: var(--gold-main); font-size: 13px; margin-left:6px;">[사용 ${getItemMaxUses(item['이름'])}회]</span>` : ''}</div>
                         <div style="font-size: 14px; color: #ccc; margin-bottom: 15px; min-height: 40px;">${item['효과']}</div>
                     </div>
                     <button class="btn-outline" style="width: 100%; border-color: rgba(255,255,255,0.2);" ${isSoldOut ? 'disabled' : ''} onclick="buyItem('${item['이름']}', ${item['가격']}, '${item['효과']}', ${isLimited}, ${stock})">${isSoldOut ? '품절' : '구매하기'}</button>
@@ -1386,7 +1449,7 @@
         if (playerData.coins < price) return alert("코인이 부족합니다!");
         if(confirm(`[${name}]${getJosa(name, '을/를')} ${price} 코인에 구매하시겠습니까?\n효과: ${effect}`)) {
             playerData.coins -= price;
-            playerData.inventory.push({name: name, date: "", sender: "시스템", msg: "", read: true});
+            playerData.inventory.push(makeInvItem(name));
             const success = await savePlayerData("고정구매", `${name} 구매`, isLimited ? name : null);
             if(success) alert(`[시스템] 구매 완료!\n'${name}'${getJosa(name, '이/가')} 소지품에 추가되었습니다.`);
         }
@@ -1510,11 +1573,23 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         return pickedItem;
     }
 
+    // 뽑기 실패 시 뽑기권 되돌리기 (사용 횟수 포함)
+    function restoreTicket(backup, index) {
+        if (!backup) return;
+        let cur = playerData.inventory[index];
+        if (cur && cur.name === backup.name && getRemainingUses(backup) > 1) {
+            cur.uses = getRemainingUses(backup);   // 차감만 됐던 경우 횟수 복구
+        } else {
+            playerData.inventory.splice(index, 0, backup); // 삭제됐던 경우 다시 넣기
+        }
+    }
+
     let gachaCount = 0;
     async function rollGacha(times) {
         let cost = times === 11 ? 1000 : 100;
         let useTicket = false;
         let ticketIndex = -1;
+        let ticketObjBackup = null;
 
         if (times === 1) {
             if (playerData && playerData.inventory) {
@@ -1531,7 +1606,8 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         if(availableCheck.length === 0) return alert("현재 뽑을 수 있는 아이템이 모두 품절되었습니다!");
 
         if (useTicket) {
-            playerData.inventory.splice(ticketIndex, 1); 
+            ticketObjBackup = {...playerData.inventory[ticketIndex]};
+            consumeOneUse(ticketIndex);
         } else {
             playerData.coins -= cost; 
         }
@@ -1570,7 +1646,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         if(pulledItems.length === 0) {
             alert("시스템 오류로 아이템을 뽑지 못했습니다.");
             if (useTicket) {
-                playerData.inventory.push({name: '1회 뽑기권', date: "", sender: "시스템", msg: "", read: true});
+                restoreTicket(ticketObjBackup, ticketIndex);
             } else {
                 playerData.coins += cost;
             }
@@ -1626,7 +1702,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
                 let hpText = change >= 0 ? `+${change}` : `${change}`;
                 logArea.innerHTML += `<div style="margin-bottom: 5px;">${prefix} <span style="color: ${change >= 0 ? '#4caf50' : '#f44336'}; font-weight:bold;">[${item['구분']}] ${item['이름']} 즉시 발동! (HP ${hpText})</span></div>`;
             } else {
-                playerData.inventory.push({name: item['이름'], date: "", sender: "시스템", msg: "", read: true});
+                playerData.inventory.push(makeInvItem(item['이름']));
                 logMsg += `${prefix} [${item['구분']}] ${item['이름']} 획득\n`;
                 logArea.innerHTML += `<div style="margin-bottom: 5px;">${prefix} <span style="color: ${rawColor}; font-weight:bold;">[${item['구분']}] ${item['이름']}</span> 획득</div>`;
             }
@@ -1702,7 +1778,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
         
         if (!success) {
             if (useTicket) {
-                playerData.inventory.push({name: '1회 뽑기권', date: "", sender: "시스템", msg: "", read: true});
+                restoreTicket(ticketObjBackup, ticketIndex);
             } else {
                 playerData.coins += cost; 
             }
