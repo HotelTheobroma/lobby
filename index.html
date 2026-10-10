@@ -373,13 +373,10 @@
     let playerData = null;
     let systemData = null; 
 
-    // 입력한 이름(시트 기재 이름 등)을 실제 캐릭터 시트의 이름으로 변환하는 함수
     function resolveCharacterName(inputName) {
         if (!systemData || !systemData.guests) return inputName;
-        // 1. '시트 기재 이름'으로 검색
         let match1 = systemData.guests.find(g => g['시트 기재 이름'] === inputName);
         if (match1 && match1['이름']) return match1['이름'];
-        // 2. '이름'으로 검색
         let match2 = systemData.guests.find(g => g['이름'] === inputName);
         if (match2 && match2['이름']) return match2['이름'];
         
@@ -422,8 +419,6 @@
         }
     }
 
-    // ===== 사용 횟수 관련 =====
-    // 시트의 '사용횟수' 열에서 아이템의 최대 사용 횟수를 읽어옴 (비어 있으면 1회)
     function getItemMaxUses(itemName) {
         if (!systemData || !itemName) return 1;
         if (itemName.startsWith("[코인 송금]")) return 1;
@@ -439,7 +434,6 @@
         return 1;
     }
 
-    // 소지품 하나의 남은 사용 횟수 (저장된 값이 없으면 시트 기본값)
     function getRemainingUses(itemObj) {
         if (!itemObj) return 1;
         let n = parseInt(itemObj.uses);
@@ -447,12 +441,10 @@
         return getItemMaxUses(itemObj.name);
     }
 
-    // 새 소지품 객체 생성 (사용 횟수 포함)
     function makeInvItem(name) {
         return {name: name, date: "", sender: "시스템", msg: "", read: true, uses: getItemMaxUses(name)};
     }
 
-    // 사용 횟수 1 차감. 0이 되면 목록에서 제거. 반환값: 차감 후 남은 횟수
     function consumeOneUse(index) {
         let itemObj = playerData.inventory[index];
         let remain = getRemainingUses(itemObj);
@@ -576,7 +568,6 @@
 
         let merged = systemData.guests.map(g => {
             let sheetName = g['시트 기재 이름'] || g['이름'];
-            // 실제 이름 기반으로 캐릭터 데이터를 매칭
             let charData = systemData.allCharacters.find(c => c.name === g['이름']);
             return {
                 name: g['이름'],
