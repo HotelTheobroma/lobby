@@ -487,6 +487,7 @@
             const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'refresh', row: playerData.row }) });
             const res = await response.json();
             if (res && res.success) {
+                // 모달이 열려 있는 동안에는 덮어쓰지 않음 (작업 중 목록이 바뀌는 것 방지)
                 const anyModal = [...document.querySelectorAll('.modal-overlay')].some(m => m.style.display === 'flex');
                 if (!anyModal && document.getElementById('loading-overlay').style.display !== 'flex') {
                     if (res.systemData) systemData = res.systemData;
@@ -600,6 +601,11 @@
         }
         
         if(viewId === 'inventory') buildInventoryUI();
+        // 바·공지(출석)에 들어올 때 최신 명단을 받아와 버튼 상태 갱신
+        if(viewId === 'bar' || viewId === 'info') {
+            buildDailyLogs(); updateAttendanceUI();
+            refreshMe().then(() => { buildDailyLogs(); updateAttendanceUI(); });
+        }
         if(viewId === 'shop') updateLimitedGachaUI(); 
     }
     
