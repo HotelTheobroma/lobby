@@ -634,6 +634,7 @@
                 img: g['프로필 사진'],
                 str: g['힘'] || 0, dex: g['민첩'] || 0, luk: g['운'] || 0,
                 link: g['프로필 링크'] || '',
+                brand: Number(g['낙인'] ?? (Object.entries(g).find(([k]) => String(k).includes('낙인')) || [])[1]) || 0,
                 hp: charData ? charData.hp : 0,
                 maxHp: charData ? charData.maxHp : 1,
                 status: charData ? (charData.status || '') : ''
@@ -672,6 +673,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                         <div style="font-size:12px; color:#fff; font-weight:bold; display:flex; align-items:center;">
                             <span style="color:var(--gold-main); margin-right:4px;">HP</span> ${g.hp} / ${g.maxHp}
+                            <span title="낙인 개수" style="font-size:10px; color:var(--text-sub); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:1px 6px; margin-left:6px; font-weight:normal;">낙인 ${g.brand}</span>
                             ${statusBadge}
                         </div>
                         <button title="프로필 새 탭으로 열기" class="btn-outline" style="padding: 2px 10px; font-size:12px; border-color:var(--gold-main); color:var(--gold-light); border-radius:4px; height:24px; line-height:1;" onclick="openProfileTab(decodeURIComponent('${encodeURIComponent(g.link).replace(/'/g, '%27')}'))">▶</button>
@@ -1782,7 +1784,7 @@ groupHtml += `<span style="background:rgba(0,0,0,0.5); padding:5px 10px; border-
             });
 
             if (!saved) {
-                resultEl.innerHTML = `자자 와 봐~ 한 번 사도 손해는 없다!<br>무려 꽝 없는 랜덤 뽑기라구?`;
+                resultEl.innerHTML = `자자 와 봐~ 부족한 상품이더라도 알뜰하게 준비했다!<br>랜덤 뽑기 한번 어때?`;
                 document.getElementById('gacha-quote').style.display = 'none';
                 return;
             }
