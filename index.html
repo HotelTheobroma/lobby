@@ -1341,12 +1341,12 @@
         const snap = takeSnapshot();
         const remainAfter = consumeOneUse(idx);
 
-        let logMsg = `[${itemName}] 전투 중 사용 (홈페이지 효과 미적용)`;
+        let logMsg = `[${itemName}] 전투 중 사용`;
         logMsg += remainAfter > 0 ? ` (남은 사용 횟수 ${remainAfter}회)` : ` (소지품에서 삭제)`;
 
         const res = await savePlayerData("전투 중 아이템 사용", logMsg, { snapshot: snap });
         if (res) {
-            let msg = `[${itemName}]${getJosa(itemName, '을/를')} 전투 중 사용으로 처리했습니다.\n(홈페이지 효과는 적용되지 않았습니다.)`;
+            let msg = `[${itemName}]${getJosa(itemName, '을/를')} 전투 중 사용으로 처리했습니다.`;
             if (remainAfter > 0) msg += `\n남은 사용 횟수: ${remainAfter}회`;
             alert(msg);
             buildInventoryUI();
