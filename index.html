@@ -78,6 +78,11 @@
 
         .item-delete-btn { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; border: 1px solid #fff; border-radius: 4px; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; z-index: 10; background: rgba(0,0,0,0.3); }
         .item-delete-btn:hover { background: #ff3333; border-color: #ff3333; }
+        .item-top-actions { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 6px; z-index: 10; }
+        .item-top-actions .item-delete-btn { position: static; }
+        .item-battle-btn { height: 22px; padding: 0 9px; border: 1px solid #e0705a; border-radius: 11px; background: rgba(120, 30, 20, 0.35); color: #ffb3a3; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; font-family: var(--font-main); transition: 0.2s; }
+        .item-battle-btn:hover { background: #c0442e; border-color: #c0442e; color: #fff; }
+        .item-top-actions + .item-meta-container { top: 42px; right: 12px; }
 
         .log-box { width: 100%; background: rgba(0,0,0,0.6); border: 1px solid var(--gold-dark); color: #ddd; padding: 15px; box-sizing: border-box; border-radius: 8px; resize: none; line-height: 1.5; font-family: var(--font-main); cursor: pointer; transition: 0.2s;}
         .log-box:hover { background: rgba(0,0,0,0.8); border-color: var(--gold-light); }
@@ -156,6 +161,9 @@
             .item-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
             .item-card .btn-outline { padding: 12px 10px; font-size: 15px; }
             .item-delete-btn { width: 28px; height: 28px; top: 10px; right: 10px; }
+            .item-top-actions { top: 10px; right: 10px; }
+            .item-battle-btn { height: 28px; padding: 0 11px; border-radius: 14px; font-size: 12px; }
+            .item-top-actions + .item-meta-container { top: 46px; right: 10px; }
             .item-meta-container { top: 10px; right: 46px; }
             .letter-icon-wrapper { padding: 6px; }
 
@@ -252,6 +260,18 @@
             <div style="display: flex; gap: 10px; margin-top: 25px;">
                 <button class="btn-primary" id="btn-confirm-delete">확인</button>
                 <button class="btn-primary btn-cancel" onclick="closeDeleteModal()">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-battle-overlay" class="modal-overlay">
+        <div class="modal-box" style="border-color: #e0705a;">
+            <h3 id="modal-battle-item-name" style="color: var(--gold-light); font-size: 22px; margin-top:0;">아이템 이름</h3>
+            <p style="color: #fff; font-size: 18px; margin-bottom: 8px;">전투 중에 사용한 아이템으로 처리할까요?</p>
+            <p id="modal-battle-notice" style="color: var(--text-sub); font-size: 12px;"></p>
+            <div style="display: flex; gap: 10px; margin-top: 22px;">
+                <button class="btn-primary" id="btn-confirm-battle">확인</button>
+                <button class="btn-primary btn-cancel" onclick="closeBattleModal()">취소</button>
             </div>
         </div>
     </div>
@@ -1122,10 +1142,13 @@
 
             list.innerHTML += `
                 <div class="item-card">
-                    <div class="item-delete-btn" onclick="openDeleteModal(${index})" title="삭제하기">✖</div>
+                    <div class="item-top-actions">
+                        ${itemName.startsWith("[코인 송금]") ? '' : `<button class="item-battle-btn" onclick="openBattleModal(${index})" title="효과 없이 사용 처리만 합니다">전투 중 사용</button>`}
+                        <div class="item-delete-btn" onclick="openDeleteModal(${index})" title="삭제하기">✖</div>
+                    </div>
 
                     ${metaHtml}
-                    <div style="padding-right: 80px;">
+                    <div style="padding-right: 130px;">
                         <div style="color: var(--gold-light); font-weight: bold; font-size:18px;">${itemName}</div>
                         ${usesHtml}
                         <div style="font-size: 14px; color: #ccc; margin-top: 8px;">${effect}</div>
@@ -1292,6 +1315,41 @@
         if(success) {
             alert(`[${itemName}]${getJosa(itemName, '을/를')} 버렸습니다.`);
             buildInventoryUI(); 
+        }
+    };
+
+    let currentBattleId = null; let currentBattleItem = "";
+    function openBattleModal(index) {
+        const itemObj = playerData.inventory[index];
+        if (!itemObj) return;
+        currentBattleId = itemObj.id; currentBattleItem = itemObj.name;
+        document.getElementById('modal-battle-item-name').innerText = itemObj.name;
+        const remain = getRemainingUses(itemObj);
+        document.getElementById('modal-battle-notice').innerText = remain > 1
+            ? `※ 사용 횟수가 1회 차감됩니다. (남은 횟수 ${remain}회 → ${remain - 1}회)`
+            : `※ 마지막 사용입니다. 소지품 목록에서 사라집니다.`;
+        document.getElementById('modal-battle-overlay').style.display = 'flex';
+    }
+    function closeBattleModal() { document.getElementById('modal-battle-overlay').style.display = 'none'; }
+
+    document.getElementById('btn-confirm-battle').onclick = async function() {
+        closeBattleModal();
+        const itemName = currentBattleItem;
+        const idx = findInvIndexById(currentBattleId);
+        if (idx === -1) return alert("이미 사라진 아이템입니다.");
+
+        const snap = takeSnapshot();
+        const remainAfter = consumeOneUse(idx);
+
+        let logMsg = `[${itemName}] 전투 중 사용 (홈페이지 효과 미적용)`;
+        logMsg += remainAfter > 0 ? ` (남은 사용 횟수 ${remainAfter}회)` : ` (소지품에서 삭제)`;
+
+        const res = await savePlayerData("전투 중 아이템 사용", logMsg, { snapshot: snap });
+        if (res) {
+            let msg = `[${itemName}]${getJosa(itemName, '을/를')} 전투 중 사용으로 처리했습니다.\n(홈페이지 효과는 적용되지 않았습니다.)`;
+            if (remainAfter > 0) msg += `\n남은 사용 횟수: ${remainAfter}회`;
+            alert(msg);
+            buildInventoryUI();
         }
     };
 
