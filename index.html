@@ -1582,7 +1582,7 @@
         systemData.npcs.forEach(npc => {
             let bgImage = npc['이미지링크'] ? `url('${npc['이미지링크']}')` : '#222';
             let linkTarget = npc['연결화면'] ? npc['연결화면'].toString().trim() : '';
-            let clickAction = linkTarget === '' ? `alert('추후 공개됩니다.')` : `nav('${linkTarget}', '${npc['이름']}')`;
+            let clickAction = linkTarget === '' ? `alert('이용이 마감되었습니다. <br> 안녕히 가십시오.')` : `nav('${linkTarget}', '${npc['이름']}')`;
             
             listContainer.innerHTML += `
                 <div class="char-card-v2" style="background-image: ${bgImage};" onclick="${clickAction}">
